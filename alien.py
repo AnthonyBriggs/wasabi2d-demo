@@ -6,11 +6,11 @@ import wasabi2d as w2d
 import pygame
 from pygame import joystick
 
-
+## These are mainly chosen for feel :)
 # pixels per second when running full tilt
-ALIEN_SPEED = 500.0
-ALIEN_FALL_ACC = 1000.0
-
+ALIEN_SPEED = 1000.0
+# acceleration due to gravity when jumping
+ALIEN_FALL_ACC = 4000.0
 
 def init_gamepads():
     pygame.joystick.init()
@@ -25,13 +25,9 @@ def init_gamepads():
     return controllers
 
 pygame.init()
-
 controllers = init_gamepads()
 print(controllers)
 
-print(w2d.event.EVENT_HANDLERS.keys())
-print(w2d.event.EVENT_PARAM_MAPPERS_JOYSTICK.keys())
-print(w2d.event.EVENT_PARAM_MAPPERS.keys())
 
 mode_1080p = 1920, 1080
 scene = w2d.Scene(
@@ -46,21 +42,13 @@ alien = scene.layers[0].add_sprite(
     'p3_stand',
     pos=(scene.width / 2, scene.height / 2)
 )
-#alien.scale_x = -1     # face left
-#alien.angle = 1     # radians
 alien.speed = [0, 0]
 alien.move_distance = 0
 alien.jumping = False
 alien.jump_speed = [0, 0]
 alien.start_jump_y = 0
 
-# BUG: only one laser = can't shoot fast :)
-laser = scene.layers[0].add_sprite(
-    'laser',
-    pos=(-100,-100))
-laser.firing = False
-laser.speed = 0
-
+lasers = []
 
 @w2d.event
 def on_key_down(key, mod, unicode):
@@ -75,7 +63,8 @@ def is_stopped(speed):
 
 @w2d.event
 def update(t, dt, keyboard):
-    print(alien.image)
+    global lasers
+    
     if alien.jumping:
         alien.image = 'p3_jump'
         alien.x += alien.jump_speed[0] * dt
@@ -88,17 +77,11 @@ def update(t, dt, keyboard):
 
     elif is_stopped(alien.speed) or sum(alien.speed) == 0:
         # stopped; reset walk distance and stand
-        #alien.move_distance = 0
-        #alien.image = 'p3_stand'
+        alien.move_distance = 0
+        alien.image = 'p3_stand'
 
-        # OK, weird bug. If we update the image, but not the sprite's position,
-        # then the image doesn't update. Assume this is an optimisation thing?
-        # Workaround: move the image a little bit, but only if we've just stopped.
-        if alien.move_distance > 0:
-            alien.move_distance = 0
-            alien.image = 'p3_stand'
-            alien.x += 1
-            alien.y += 1
+        # call _set_dirty() to force a redraw (workaround for a bug in Wasabi2d)
+        alien._set_dirty()
 
     else:
         # moving
@@ -118,27 +101,31 @@ def update(t, dt, keyboard):
         walk_pos = (int(alien.move_distance / 12)) % 11 + 1
         alien.image = 'p3_walk{:0>2}'.format(walk_pos)
 
-    if laser.firing:
-        laser.x += laser.speed
-        if laser.x < -500 or laser.x > 5000:
-            # outside the screen
-            laser.firing = False
-            laser.speed = 0
-        
+    if lasers:
+        print("%d lasers: %s" % (len(lasers), [(l.x, l.speed) for l in lasers]))
+        for laser in lasers:
+            laser.x += laser.speed
+        # replace lasers with just the ones onscreen
+        lasers = [l for l in lasers 
+                    if (laser.x > -laser.width and laser.speed < 0)     # right and moving left
+                    or (laser.x < scene.width + laser.width and laser.speed > 0)]   # left and moving right
+
 @w2d.event
 def on_joybutton_down(joy, button):
     print("Button %s down on joystick %s" % (button, joy))
     if button == 0:
-        laser.pos = alien.pos
-        laser.firing = True
+        laser = scene.layers[0].add_sprite(
+            'laser',
+            pos=alien.pos)
         laser.speed = 40 * alien.scale
+        lasers.append(laser)
 
     if button == 1 and not alien.jumping:
         alien.jumping = True
         # jump height is proportional to how fast we run, but should
-        # be a minimum of half run speed
-        jumpy = (ALIEN_SPEED * 0.5) + (ALIEN_SPEED * 0.5 * abs(alien.speed[0] / ALIEN_SPEED))
-        alien.jump_speed = [alien.speed[0], -jumpy]
+        # still be able to jump pretty high when stopped
+        jump_y = ALIEN_SPEED + abs(alien.speed[0]) * 0.5
+        alien.jump_speed = [alien.speed[0], -jump_y]
         alien.start_jump_y = alien.y + 1
 
 @w2d.event
@@ -152,7 +139,7 @@ def sanitise_axis(value):
     else:
         return value
 
-# NB: Add the following to wasabi2d's game.py, line 61
+# NB: Add the following to wasabi2d's game.py, line 61 if necessary:
 #       'on_joyaxis_motion': pygame.JOYAXISMOTION,
 
 @w2d.event
